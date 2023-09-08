@@ -7,12 +7,15 @@
 		"node": ">=18.0.0"
 	},
 	"dependencies": {
+		"@octokit/openapi-types": "^18.0.0",
 		"apify": "^3.1.4",
 		"axios": "^1.4.0",
-		"cheerio": "^1.0.0-rc.12"
+		"cheerio": "^1.0.0-rc.12",
+		"octokit": "^3.1.0"
 	},
 	"devDependencies": {
 		"@apify/tsconfig": "^0.1.0",
+		"@types/node": "^20.5.9",
 		"ts-node": "^10.9.1",
 		"typescript": "^5.0.4"
 	},

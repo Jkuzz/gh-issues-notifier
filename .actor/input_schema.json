@@ -1,0 +1,15 @@
+{
+    "title": "Scrape data from a web page",
+    "type": "object",
+    "schemaVersion": 1,
+    "properties": {
+        "startUrls": {
+        "title": "URL of the page",
+        "type": "array",
+        "description": "The URLs or repository names of repositories you want to monitor.",
+        "editor": "textfield",
+        "prefill": "https://www.apify.com"
+        }
+    },
+    "required": ["url"]
+}
