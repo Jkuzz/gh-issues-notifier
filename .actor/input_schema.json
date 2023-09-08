@@ -13,9 +13,22 @@
     "searchKeywords": {
       "title": "Keywords to search for",
       "type": "array",
-      "description": "The URLs or repository names of repositories you want to monitor.",
+      "description": "The keywords that will be looked for in new issues.",
       "editor": "stringList",
       "prefill": []
+    },
+    "slackToken": {
+      "title": "Slack token",
+      "type": "string",
+      "description": "Slack API token.",
+      "editor": "textfield"
+    },
+    "slackChannel": {
+      "title": "Slack channel",
+      "type": "string",
+      "description": "Channel where the notification with Github issues information will be sent (e.g. #general)",
+      "prefill": "#general",
+      "editor": "textfield"
     }
   },
   "required": ["searchRepos", "searchKeywords"]

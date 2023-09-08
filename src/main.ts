@@ -2,9 +2,9 @@
 import * as cheerio from 'cheerio'
 // Apify SDK - toolkit for building Apify Actors (Read more at https://docs.apify.com/sdk/js/).
 import { Actor } from 'apify'
-
 import { Octokit } from 'octokit'
 import { RestEndpointMethodTypes } from '@octokit/plugin-rest-endpoint-methods'
+import { sendSlackNotification } from './slack'
 
 // Extracts element type from array type
 type ArrElement<ArrType> = ArrType extends readonly (infer ElementType)[] ? ElementType : never
@@ -16,6 +16,8 @@ await Actor.init()
 interface Input {
   searchRepos: string[]
   searchKeywords: string[]
+  slackToken?: string
+  slackChannel?: string
 }
 
 const processRepoUrl = (url: string) => {
@@ -70,18 +72,32 @@ const { searchRepos, searchKeywords } = input
 const octokit = new Octokit({})
 
 const relevantIssues = await findRelevantIssues(searchRepos, searchKeywords)
-const actorOutput = relevantIssues.flatMap((repoSearchResults) => {
+const potentialOutputs = relevantIssues.flatMap((repoSearchResults) => {
   return repoSearchResults.issues.map((issue) => {
     return {
       repo: repoSearchResults.repo,
       url: issue.url,
       title: issue.title,
-      user: issue.user?.login,
+      author: issue.user?.login,
       createdAt: issue.created_at,
+      id: issue.id,
     }
   })
 })
-// TODO: save issue to kv store to avoid reporting it repeadely
+const reportedIssuesStore = await Actor.openKeyValueStore('reported-issues')
+
+const actorOutput = potentialOutputs.filter(async (potentialOutput) => {
+  const alreadyReported = await reportedIssuesStore.getValue(`${potentialOutput.id}`)
+  if (alreadyReported) {
+    return false
+  }
+  reportedIssuesStore.setValue(`${potentialOutput.id}`, true)
+  return true
+})
+
+if (actorOutput.length > 0 && input.slackChannel && input.slackToken) {
+  await sendSlackNotification({ token: input.slackToken, channel: input.slackChannel })
+}
 
 // Save headings to Dataset - a table-like storage.
 await Actor.pushData(actorOutput)
