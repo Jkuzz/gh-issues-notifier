@@ -13,7 +13,7 @@
     "searchKeywords": {
       "title": "Keywords to search for",
       "type": "array",
-      "description": "The keywords that will be looked for in new issues.",
+      "description": "The keywords that will be looked for in the titles and bodies of new issues.",
       "editor": "stringList",
       "prefill": []
     },
@@ -21,7 +21,8 @@
       "title": "Slack token",
       "type": "string",
       "description": "Slack API token.",
-      "editor": "textfield"
+      "editor": "textfield",
+      "isSecret": true
     },
     "slackChannel": {
       "title": "Slack channel",

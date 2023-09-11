@@ -24,6 +24,13 @@ interface Input {
   slackChannel?: string
 }
 
+/**
+ * Checks whether or not the issue is relevant.
+ * Looks for search keywords in the title or body of the issue.
+ * @param issue to check
+ * @param searchKeywords keywords to look for
+ * @returns true if the issue is relevant
+ */
 const checkIssueRelevant = (issue: ArrElement<Issue['data']>, searchKeywords: string[]) => {
   if (!issue || issue.state !== 'open') {
     return false
@@ -48,14 +55,19 @@ const checkIssueRelevant = (issue: ArrElement<Issue['data']>, searchKeywords: st
 }
 
 /**
- * Discover all issues that are deemed relevant.
+ * Discover all issues that are deemed relevant and were not reported yet.
  * Goes through all the provided GH repositories and looks at the issue text
  * @param repoUrls urls of repos to search
  * @param searchKeywords keywords to match in the search
+ * @param checkedFilter lambda to filter out issues that were already reported
  * @returns list of repos, each as a list of issues
  */
-const findRelevantIssues = async (repoUrls: string[], searchKeywords: string[]) => {
-  const outputs: Issue['data'][] = []
+const findRelevantIssues = async (
+  repoUrls: string[],
+  searchKeywords: string[],
+  checkedFilter: (potentialNewIssue: ArrElement<Issue['data']>) => boolean
+) => {
+  let outputs: Issue['data'] = []
   for (let url of repoUrls) {
     const repoInfo = parseRepoUrl(url)
     const repoIssues = await octokit.rest.issues.listForRepo({
@@ -63,14 +75,14 @@ const findRelevantIssues = async (repoUrls: string[], searchKeywords: string[]) 
       repo: repoInfo.repoName,
     })
 
-    const relevantIssues = repoIssues.data.filter((issue) =>
-      checkIssueRelevant(issue, searchKeywords)
-    )
+    const relevantIssues = repoIssues.data
+      .filter(checkedFilter)
+      .filter((issue) => checkIssueRelevant(issue, searchKeywords))
 
     if (relevantIssues.length === 0) {
       continue // no relevant issues, next repo
     }
-    outputs.push(relevantIssues)
+    outputs = outputs.concat(relevantIssues)
   }
   return outputs
 }
@@ -99,10 +111,19 @@ const lastCheckedAtDate = (await reportedIssuesStore.getValue('lastCheckedAt')) 
 const lastCheckedAt = +lastCheckedAtDate
 reportedIssuesStore.setValue('lastCheckedAt', Date.now())
 
-const relevantIssues = await findRelevantIssues(searchRepos, searchKeywords)
-const newIssues = relevantIssues
-  .flat()
-  .filter((potentialNewIssue) => checkIssueNotReported(potentialNewIssue, lastCheckedAt))
+// Closure filter function with last checked timestamp
+const issueAlreadyCheckedFilter = (potentialNewIssue: ArrElement<Issue['data']>) => {
+  return checkIssueNotReported(potentialNewIssue, lastCheckedAt)
+}
+
+const relevantIssues = await findRelevantIssues(
+  searchRepos,
+  searchKeywords,
+  issueAlreadyCheckedFilter
+)
+const newIssues = relevantIssues.filter((potentialNewIssue) =>
+  checkIssueNotReported(potentialNewIssue, lastCheckedAt)
+)
 
 if (newIssues.length > 0) {
   log.info(`Discovered ${newIssues.length} new issues.`)
