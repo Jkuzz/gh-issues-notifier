@@ -1,4 +1,4 @@
-import { ApifyClient, log } from 'apify'
+import { ApifyClient } from 'apify'
 
 const SLACK_ACTOR_ID = 'katerinahronik/slack-message'
 const MESSAGE_TEXT = 'New GitHub issues were discovered!'
@@ -24,7 +24,5 @@ export const sendSlackNotification = async (slackIntegration: SlackIntegration) 
     text: MESSAGE_TEXT,
     blocks: slackIntegration.blocks,
   }
-
-  log.info(`Slack notification:\n${JSON.stringify(slackIntegration.blocks)}`)
   await slackActorClient.call(slackActorInput)
 }

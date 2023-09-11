@@ -1,5 +1,5 @@
-import type { Issue, ArrElement } from "./main.js"
-import { repoUrlToFullName } from "./utils.js"
+import type { Issue, ArrElement } from './main.js'
+import { parseRepoUrl } from './utils.js'
 
 /**
  * Create Slack blocks detailing the newly discovered issues for each repository.
@@ -46,17 +46,13 @@ const createTitleBlocks = () => {
  * @returns slack blocks
  */
 const createRepositoryBlocks = (repoUrl: string) => {
-  const repoFullName = repoUrlToFullName(repoUrl)
+  const parsedRepoUrl = parseRepoUrl(repoUrl)
   return [
-    {
-      type: 'divider',
-    },
     {
       type: 'header',
       text: {
-        type: 'mrkdwn',
-        text: `<${repoUrl}|${repoFullName}>`,
-        emoji: true,
+        type: 'plain_text',
+        text: `${parsedRepoUrl.user}/${parsedRepoUrl.repoName}`,
       },
     },
   ]
@@ -75,10 +71,10 @@ const createIssueBlocks = (issue: ArrElement<Issue['data']>) => {
           type: 'mrkdwn',
           text: `<${issue.url}|${issue.title}>`,
         },
-        {
-          type: 'mrkdwn',
-          text: '*Keywords:*\nTODO',
-        },
+        // {
+        //   type: 'mrkdwn',
+        //   text: '*Keywords:*\nTODO',
+        // },
       ],
     },
     {
@@ -94,12 +90,8 @@ const createIssueBlocks = (issue: ArrElement<Issue['data']>) => {
         },
       ],
     },
-    // {
-    //   type: 'section',
-    //   text: {
-    //     type: 'mrkdwn',
-    //     text: `<${issue.url}|View issue>`,
-    //   },
-    // },
+    {
+      type: 'divider',
+    },
   ]
 }
