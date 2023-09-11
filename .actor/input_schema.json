@@ -20,7 +20,7 @@
     "slackToken": {
       "title": "Slack token",
       "type": "string",
-      "description": "Slack API token.",
+      "description": "Slack API token in a format xoxp-xxxxxxxxx-xxxx.",
       "editor": "textfield",
       "isSecret": true
     },
