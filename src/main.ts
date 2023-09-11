@@ -4,11 +4,15 @@ import * as cheerio from 'cheerio'
 import { Actor } from 'apify'
 import { Octokit } from 'octokit'
 import { RestEndpointMethodTypes } from '@octokit/plugin-rest-endpoint-methods'
-import { sendSlackNotification } from './slack'
+import { sendSlackNotification } from './slackMessage.js'
+import { createSlackMessageBlocks } from './slackBlocks.js'
+import { repoUrlToFullName } from './utils.js'
 
 // Extracts element type from array type
-type ArrElement<ArrType> = ArrType extends readonly (infer ElementType)[] ? ElementType : never
-type Issue = RestEndpointMethodTypes['issues']['listForRepo']['response']
+export type ArrElement<ArrType> = ArrType extends readonly (infer ElementType)[]
+  ? ElementType
+  : never
+export type Issue = RestEndpointMethodTypes['issues']['listForRepo']['response']
 
 // The init() call configures the Actor for its environment. It's recommended to start every Actor with an init().
 await Actor.init()
@@ -18,12 +22,6 @@ interface Input {
   searchKeywords: string[]
   slackToken?: string
   slackChannel?: string
-}
-
-const processRepoUrl = (url: string) => {
-  const repo = url.replace('https://github.com/', '')
-  const [user, repoName] = repo.split('/')
-  return { user, repoName }
 }
 
 const checkIssueRelevant = (issue: ArrElement<Issue['data']>, searchKeywords: string[]) => {
@@ -40,10 +38,17 @@ const checkIssueRelevant = (issue: ArrElement<Issue['data']>, searchKeywords: st
   return false
 }
 
+/**
+ * Discover all issues that are deemed relevant.
+ * Goes through all the provided GH repositories and looks at the
+ * @param repoUrls
+ * @param searchKeywords
+ * @returns
+ */
 const findRelevantIssues = async (repoUrls: string[], searchKeywords: string[]) => {
-  const outputs: { repo: string; issues: Issue['data'] }[] = []
+  const outputs: Issue['data'][] = []
   for (let url of repoUrls) {
-    const repoInfo = processRepoUrl(url)
+    const repoInfo = repoUrlToFullName(url)
     const repoIssues = await octokit.rest.issues.listForRepo({
       owner: repoInfo.user,
       repo: repoInfo.repoName,
@@ -57,10 +62,7 @@ const findRelevantIssues = async (repoUrls: string[], searchKeywords: string[]) 
       console.log('no issues')
       continue // no relevant issues, next repo
     }
-    outputs.push({
-      repo: repoInfo.repoName,
-      issues: relevantIssues,
-    })
+    outputs.push(relevantIssues)
   }
   return outputs
 }
@@ -71,36 +73,37 @@ if (!input) throw new Error('Input is missing!')
 const { searchRepos, searchKeywords } = input
 const octokit = new Octokit({})
 
-const relevantIssues = await findRelevantIssues(searchRepos, searchKeywords)
-const potentialOutputs = relevantIssues.flatMap((repoSearchResults) => {
-  return repoSearchResults.issues.map((issue) => {
-    return {
-      repo: repoSearchResults.repo,
-      url: issue.url,
-      title: issue.title,
-      author: issue.user?.login,
-      createdAt: issue.created_at,
-      id: issue.id,
-    }
-  })
-})
 const reportedIssuesStore = await Actor.openKeyValueStore('reported-issues')
 
-const actorOutput = potentialOutputs.filter(async (potentialOutput) => {
-  const alreadyReported = await reportedIssuesStore.getValue(`${potentialOutput.id}`)
-  if (alreadyReported) {
-    return false
-  }
-  reportedIssuesStore.setValue(`${potentialOutput.id}`, true)
-  return true
-})
+const relevantIssues = await findRelevantIssues(searchRepos, searchKeywords)
+const reposWithNewIssues = relevantIssues
+  // For each repo, filter out issues that were already reported
+  .map((repoFoundIssues) => {
+    const newRepoIssues = repoFoundIssues.filter(async (potentialNewIssue) => {
+      // TODO optimise this by saving timestamp of last report instead of list of reported issues
+      const alreadyReported = await reportedIssuesStore.getValue(`${potentialNewIssue.id}`)
+      if (alreadyReported) {
+        return false
+      }
+      reportedIssuesStore.setValue(`${potentialNewIssue.id}`, { reported: true})
+      return true
+    })
+    return newRepoIssues
+  })
+  // filter out repos with no new issues
+  .filter((repoIssues) => repoIssues.length > 0)
 
-if (actorOutput.length > 0 && input.slackChannel && input.slackToken) {
-  await sendSlackNotification({ token: input.slackToken, channel: input.slackChannel })
+if (reposWithNewIssues.length > 0 && input.slackChannel && input.slackToken) {
+  const slackMessageBlocks = createSlackMessageBlocks(reposWithNewIssues)
+  await sendSlackNotification({
+    token: input.slackToken,
+    channel: input.slackChannel,
+    blocks: slackMessageBlocks,
+  })
 }
 
 // Save headings to Dataset - a table-like storage.
-await Actor.pushData(actorOutput)
+await Actor.pushData(reposWithNewIssues)
 
 // Gracefully exit the Actor process. It's recommended to quit all Actors with an exit().
 await Actor.exit()
