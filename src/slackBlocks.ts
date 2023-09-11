@@ -1,26 +1,14 @@
 import type { Issue, ArrElement } from './main.js'
-import { parseRepoUrl } from './utils.js'
 
 /**
- * Create Slack blocks detailing the newly discovered issues for each repository.
+ * Create Slack blocks detailing the newly discovered issue.
  * https://api.slack.com/block-kit/building
- * @param reposWithNewIssues list of repositories, each as a list of issues
- * @returns Slack message Blocks summarising the new issues
+ * @param newIssue issue to make message for, as returned by octokit
+ * @returns Slack message Blocks summarising the new issue
  */
-export const createSlackMessageBlocks = (reposWithNewIssues: Issue['data'][]) => {
+export const createSlackMessageBlocks = (newIssue: ArrElement<Issue['data']>) => {
   let blocks: object[] = createTitleBlocks()
-
-  for (let repoIssues of reposWithNewIssues) {
-    if (repoIssues.length === 0) {
-      continue
-    }
-    const repoUrl = repoIssues[0].repository_url
-
-    blocks = blocks.concat(createRepositoryBlocks(repoUrl))
-    for (let issue of repoIssues) {
-      blocks = blocks.concat(createIssueBlocks(issue))
-    }
-  }
+  blocks = blocks.concat(createIssueBlocks(newIssue))
   return blocks
 }
 
@@ -34,25 +22,8 @@ const createTitleBlocks = () => {
       type: 'header',
       text: {
         type: 'plain_text',
-        text: 'New GitHub issues were discovered!',
+        text: 'New GitHub issue was discovered! 🔎',
         emoji: true,
-      },
-    },
-  ]
-}
-
-/**
- * Create Slack blocks for the title of the repository. Does not handle child issues.
- * @returns slack blocks
- */
-const createRepositoryBlocks = (repoUrl: string) => {
-  const parsedRepoUrl = parseRepoUrl(repoUrl)
-  return [
-    {
-      type: 'header',
-      text: {
-        type: 'plain_text',
-        text: `${parsedRepoUrl.user}/${parsedRepoUrl.repoName}`,
       },
     },
   ]
@@ -89,9 +60,6 @@ const createIssueBlocks = (issue: ArrElement<Issue['data']>) => {
           text: `*Author:*\n<${issue.user?.url}|${issue.user?.login}>`,
         },
       ],
-    },
-    {
-      type: 'divider',
     },
   ]
 }

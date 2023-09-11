@@ -25,16 +25,25 @@ interface Input {
 }
 
 const checkIssueRelevant = (issue: ArrElement<Issue['data']>, searchKeywords: string[]) => {
-  if (!issue || issue.state !== 'open' || !issue.body) {
+  if (!issue || issue.state !== 'open') {
     return false
   }
 
-  const $ = cheerio.load(issue.body)
   for (let keyword of searchKeywords) {
-    if ($.text().indexOf(keyword) > -1) {
+    if (issue.title.indexOf(keyword) > -1) {
       return true
     }
   }
+
+  if (issue.body) {
+    const $ = cheerio.load(issue.body)
+    for (let keyword of searchKeywords) {
+      if ($.text().indexOf(keyword) > -1) {
+        return true
+      }
+    }
+  }
+
   return false
 }
 
@@ -59,7 +68,6 @@ const findRelevantIssues = async (repoUrls: string[], searchKeywords: string[]) 
     )
 
     if (relevantIssues.length === 0) {
-      console.log('no issues')
       continue // no relevant issues, next repo
     }
     outputs.push(relevantIssues)
@@ -92,34 +100,31 @@ const lastCheckedAt = +lastCheckedAtDate
 reportedIssuesStore.setValue('lastCheckedAt', Date.now())
 
 const relevantIssues = await findRelevantIssues(searchRepos, searchKeywords)
-const reposWithNewIssues = relevantIssues
-  // For each repo, filter out issues that were already reported
-  .map((repoFoundIssues) => {
-    return repoFoundIssues.filter((potentialNewIssue) =>
-      checkIssueNotReported(potentialNewIssue, lastCheckedAt)
-    )
-  })
-  // filter out repos with no new issues
-  .filter((repoIssues) => repoIssues.length > 0)
+const newIssues = relevantIssues
+  .flat()
+  .filter((potentialNewIssue) => checkIssueNotReported(potentialNewIssue, lastCheckedAt))
 
-if (reposWithNewIssues.length > 0) {
-  log.info(`Discovered ${reposWithNewIssues.flat().length} new issues in ${reposWithNewIssues.length} repositories.`)
+if (newIssues.length > 0) {
+  log.info(`Discovered ${newIssues.length} new issues.`)
 } else {
   log.info('No new issues discovered.')
 }
 
-if (reposWithNewIssues.length > 0 && input.slackChannel && input.slackToken) {
+if (newIssues.length > 0 && input.slackChannel && input.slackToken) {
   log.info(`Sending Slack notification with new issues.`)
-  const slackMessageBlocks = createSlackMessageBlocks(reposWithNewIssues)
-  await sendSlackNotification({
-    token: input.slackToken,
-    channel: input.slackChannel,
-    blocks: slackMessageBlocks,
+  const messagePromises = newIssues.map((newIssue) => {
+    const slackMessageBlocks = createSlackMessageBlocks(newIssue)
+    return sendSlackNotification({
+      token: input.slackToken!,
+      channel: input.slackChannel!,
+      blocks: slackMessageBlocks,
+    })
   })
+  Promise.all(messagePromises)
 }
 
 // Save headings to Dataset - a table-like storage.
-await Actor.pushData({ issues: reposWithNewIssues })
+await Actor.pushData(newIssues)
 
 // Gracefully exit the Actor process. It's recommended to quit all Actors with an exit().
 await Actor.exit()

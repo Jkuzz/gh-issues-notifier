@@ -1,7 +1,7 @@
 import { ApifyClient } from 'apify'
 
 const SLACK_ACTOR_ID = 'katerinahronik/slack-message'
-const MESSAGE_TEXT = 'New GitHub issues were discovered!'
+const MESSAGE_TEXT = 'New GitHub issue was discovered!'
 
 type SlackIntegration = {
   channel: string
@@ -13,6 +13,7 @@ type SlackIntegration = {
  * Send a slack notification containing the provided message data.
  * Uses the Apify Actor katerinahronik/slack-message
  * @param slackIntegration connection data for the Slack integration
+ * @returns promise of slack actor call
  */
 export const sendSlackNotification = async (slackIntegration: SlackIntegration) => {
   const apifyClient = new ApifyClient({ token: process.env.APIFY_TOKEN })
@@ -24,5 +25,6 @@ export const sendSlackNotification = async (slackIntegration: SlackIntegration) 
     text: MESSAGE_TEXT,
     blocks: slackIntegration.blocks,
   }
-  await slackActorClient.call(slackActorInput)
+
+  return slackActorClient.call(slackActorInput)
 }
