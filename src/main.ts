@@ -6,7 +6,8 @@ import { Octokit } from 'octokit'
 import { RestEndpointMethodTypes } from '@octokit/plugin-rest-endpoint-methods'
 import { sendSlackNotification } from './slackMessage.js'
 import { createSlackMessageBlocks } from './slackBlocks.js'
-import { parseRepoUrl } from './utils.js'
+import { parseRepoNameOrUrl } from './utils.js'
+import { createObjectDigest } from './hash.js'
 
 // Extracts element type from array type
 export type ArrElement<ArrType> = ArrType extends readonly (infer ElementType)[]
@@ -14,15 +15,14 @@ export type ArrElement<ArrType> = ArrType extends readonly (infer ElementType)[]
   : never
 export type Issue = RestEndpointMethodTypes['issues']['listForRepo']['response']
 
-// The init() call configures the Actor for its environment. It's recommended to start every Actor with an init().
-await Actor.init()
-
 interface Input {
   searchRepos: string[]
   searchKeywords: string[]
   slackToken?: string
   slackChannel?: string
 }
+
+const KV_STORE_NAME = 'GH_ISSUES_NOTIFIER_STATE'
 
 /**
  * Checks whether or not the issue is relevant.
@@ -62,14 +62,22 @@ const checkIssueRelevant = (issue: ArrElement<Issue['data']>, searchKeywords: st
  * @param checkedFilter lambda to filter out issues that were already reported
  * @returns list of repos, each as a list of issues
  */
-const findRelevantIssues = async (
+const findRelevantNewIssues = async (
   repoUrls: string[],
   searchKeywords: string[],
   checkedFilter: (potentialNewIssue: ArrElement<Issue['data']>) => boolean
 ) => {
   let outputs: Issue['data'] = []
   for (let url of repoUrls) {
-    const repoInfo = parseRepoUrl(url)
+    let repoInfo
+    try {
+      repoInfo = parseRepoNameOrUrl(url)
+    } catch (e) {
+      if (e instanceof Error) {
+        log.error(e.message)
+      }
+      continue
+    }
     const repoIssues = await octokit.rest.issues.listForRepo({
       owner: repoInfo.user,
       repo: repoInfo.repoName,
@@ -104,25 +112,34 @@ const checkIssueNotReported = (
 const input = await Actor.getInput<Input>()
 if (!input) throw new Error('Input is missing!')
 const { searchRepos, searchKeywords } = input
+
+if (!searchRepos || searchRepos.length === 0) {
+  log.error('No repositories provided!')
+}
+if (!searchKeywords || searchKeywords.length === 0) {
+  log.error('No search keywords provided!')
+}
+
+// The init() call configures the Actor for its environment. It's recommended to start every Actor with an init().
+await Actor.init()
 const octokit = new Octokit({})
 
-const reportedIssuesStore = await Actor.openKeyValueStore('reported-issues')
-const lastCheckedAtDate = (await reportedIssuesStore.getValue('lastCheckedAt')) || '0'
-const lastCheckedAt = +lastCheckedAtDate
-reportedIssuesStore.setValue('lastCheckedAt', Date.now())
+
+const reportedIssuesStore = await Actor.openKeyValueStore(KV_STORE_NAME)
+const actorInstanceHash = await createObjectDigest(input)
+const lastCheckedAt = +((await reportedIssuesStore.getValue(actorInstanceHash)) || '0')
+log.info(`Saving current actor information under hash [${actorInstanceHash}]`)
+reportedIssuesStore.setValue(actorInstanceHash, Date.now())
 
 // Closure filter function with last checked timestamp
 const issueAlreadyCheckedFilter = (potentialNewIssue: ArrElement<Issue['data']>) => {
   return checkIssueNotReported(potentialNewIssue, lastCheckedAt)
 }
 
-const relevantIssues = await findRelevantIssues(
+const newIssues = await findRelevantNewIssues(
   searchRepos,
   searchKeywords,
   issueAlreadyCheckedFilter
-)
-const newIssues = relevantIssues.filter((potentialNewIssue) =>
-  checkIssueNotReported(potentialNewIssue, lastCheckedAt)
 )
 
 if (newIssues.length > 0) {
