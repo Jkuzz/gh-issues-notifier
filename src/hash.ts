@@ -1,3 +1,5 @@
+import crypto from 'crypto'
+
 /**
  * Create crypto hash using SHA-256.
  * If object includes array fields, those fields are sorted using `.sort()`

@@ -22,7 +22,7 @@ interface Input {
   slackChannel?: string
 }
 
-const KV_STORE_NAME = 'GH_ISSUES_NOTIFIER_STATE'
+const KV_STORE_NAME = 'gh-issues-notifier-state'
 
 /**
  * Checks whether or not the issue is relevant.
@@ -60,6 +60,7 @@ const checkIssueRelevant = (issue: ArrElement<Issue['data']>, searchKeywords: st
  * @param repoUrls urls of repos to search
  * @param searchKeywords keywords to match in the search
  * @param checkedFilter lambda to filter out issues that were already reported
+ * @throws when octokit issues fail to fetch
  * @returns list of repos, each as a list of issues
  */
 const findRelevantNewIssues = async (
@@ -108,6 +109,57 @@ const checkIssueNotReported = (
   return Date.parse(potentialNewIssue.created_at) > lastCheckedAt
 }
 
+const findAndReportIssues = async (input: Input) => {
+  const reportedIssuesStore = await Actor.openKeyValueStore(KV_STORE_NAME)
+  const actorInstanceHash = await createObjectDigest(input)
+  const lastCheckedAt = +((await reportedIssuesStore.getValue(actorInstanceHash)) || '0')
+  const currentCheckedAt = Date.now()
+
+  // Closure filter function with last checked timestamp
+  const issueAlreadyCheckedFilter = (potentialNewIssue: ArrElement<Issue['data']>) => {
+    return checkIssueNotReported(potentialNewIssue, lastCheckedAt)
+  }
+
+  let newIssues: Awaited<ReturnType<typeof findRelevantNewIssues>>
+  try {
+    newIssues = await findRelevantNewIssues(searchRepos, searchKeywords, issueAlreadyCheckedFilter)
+  } catch (_e) {
+    log.error(
+      'Error fetching issues from GitHub. One of your selected repos is likely misspelled or private.'
+    )
+    return
+  }
+
+  log.info(`Saving current actor information under hash [${actorInstanceHash}]`)
+  reportedIssuesStore.setValue(actorInstanceHash, currentCheckedAt)
+
+  if (newIssues.length > 0) {
+    log.info(`Discovered ${newIssues.length} new issues.`)
+  } else {
+    log.info('No new issues discovered.')
+    return
+  }
+
+  if (input.slackChannel && input.slackToken) {
+    log.info(`Sending Slack notification with new issues.`)
+    const messagePromises = newIssues.map((newIssue) => {
+      const slackMessageBlocks = createSlackMessageBlocks(newIssue)
+      return sendSlackNotification({
+        token: input.slackToken!,
+        channel: input.slackChannel!,
+        blocks: slackMessageBlocks,
+      })
+    })
+    Promise.all(messagePromises)
+  }
+
+  // Save headings to Dataset - a table-like storage.
+  await Actor.pushData(newIssues)
+}
+
+// The init() call configures the Actor for its environment. It's recommended to start every Actor with an init().
+await Actor.init()
+
 // Structure of input is defined in input_schema.json
 const input = await Actor.getInput<Input>()
 if (!input) throw new Error('Input is missing!')
@@ -120,49 +172,9 @@ if (!searchKeywords || searchKeywords.length === 0) {
   log.error('No search keywords provided!')
 }
 
-// The init() call configures the Actor for its environment. It's recommended to start every Actor with an init().
-await Actor.init()
 const octokit = new Octokit({})
 
-
-const reportedIssuesStore = await Actor.openKeyValueStore(KV_STORE_NAME)
-const actorInstanceHash = await createObjectDigest(input)
-const lastCheckedAt = +((await reportedIssuesStore.getValue(actorInstanceHash)) || '0')
-log.info(`Saving current actor information under hash [${actorInstanceHash}]`)
-reportedIssuesStore.setValue(actorInstanceHash, Date.now())
-
-// Closure filter function with last checked timestamp
-const issueAlreadyCheckedFilter = (potentialNewIssue: ArrElement<Issue['data']>) => {
-  return checkIssueNotReported(potentialNewIssue, lastCheckedAt)
-}
-
-const newIssues = await findRelevantNewIssues(
-  searchRepos,
-  searchKeywords,
-  issueAlreadyCheckedFilter
-)
-
-if (newIssues.length > 0) {
-  log.info(`Discovered ${newIssues.length} new issues.`)
-} else {
-  log.info('No new issues discovered.')
-}
-
-if (newIssues.length > 0 && input.slackChannel && input.slackToken) {
-  log.info(`Sending Slack notification with new issues.`)
-  const messagePromises = newIssues.map((newIssue) => {
-    const slackMessageBlocks = createSlackMessageBlocks(newIssue)
-    return sendSlackNotification({
-      token: input.slackToken!,
-      channel: input.slackChannel!,
-      blocks: slackMessageBlocks,
-    })
-  })
-  Promise.all(messagePromises)
-}
-
-// Save headings to Dataset - a table-like storage.
-await Actor.pushData(newIssues)
+await findAndReportIssues(input)
 
 // Gracefully exit the Actor process. It's recommended to quit all Actors with an exit().
 await Actor.exit()
